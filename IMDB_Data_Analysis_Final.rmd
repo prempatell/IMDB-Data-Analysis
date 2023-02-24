@@ -1,0 +1,1436 @@
+---
+title: "Data606_Project_Group8"
+output: html_notebook
+---
+
+# Library Import 
+
+```{r include=FALSE}
+library(AppliedPredictiveModeling)
+library(binom)
+library(car)
+library(caret)
+library(collapsibleTree)
+library(dbplyr)
+library(dplyr)
+library(plyr)
+library(EnvStats)
+library(GGally)
+library(ggformula)
+library(ggplot2)
+library(gmodels)
+library(htmltools)
+library(ISLR)
+library(knitr)
+library(lawstat)
+library(lmtest)
+library(markdown)
+library(MASS)
+library(mctest)
+library(mosaic)
+library(mdsr)
+library(mosaicData)
+library(nycflights13)
+library(olsrr)
+#library(party)					# Alternative decision tree algorithm
+#library(partykit)				# Convert rpart object to BinaryTree
+#library(plyr)
+#library(purrr)
+#library(plotly)
+#library(resampledata)
+library(Rfast) 
+library(rmarkdown)
+library(rpart)
+library(rpart.plot)
+library(rvest)
+library(SDaA)
+library(shiny)
+library(stringi)
+library(stringr)
+library(tibble)
+library(tidyr)
+library(tidyselect)
+library(tinytex)
+library(tree) 
+library(yaml)
+library(shiny)
+library(sampling)
+library(survey)
+library(MASS)
+library(mlbench)
+library(klaR)
+library(questionr) 
+#library(rpart)				        # Popular decision tree algorithm
+#library(rattle)					# Fancy tree plot
+#library(rpart.plot)				# Enhanced tree plots
+#library(RColorBrewer)				# Color selection for fancy tree plot
+#library(nnet) 
+library(VGAM) 
+options(scipen = 100)
+```
+
+# Understanding the Dataset
+
+```{r}
+movie = read.csv("movies.csv")
+dim(movie)
+```
+There are 15 columns and 7668 rows within the dataset. 
+
+```{r}
+colnames(movie)
+```
+The dataset columns can be found in the above output.
+
+Note that each question will load in the dataset separately as data cleaning and analyses unique to each question is required. 
+
+# Exploratory Questions
+
+## Question 1
+
+Can we predict the IMDB Score Rating based on budget, votes, gross, and other relevant columns ? 
+
+```{r}
+#read the csv
+imdb.data <- read.csv('movies.csv')
+imdb.data <- na.omit(imdb.data)
+```
+```{r}
+df<-(within(imdb.data, rm(name, released, director, writer, star, country, company, year))  )
+ggpairs(df)
+```
+```{r IMDB First Model}
+score_model=lm(score~votes+budget+gross+runtime+factor(genre), data=imdb.data)
+summary(score_model)
+```
+```{r}
+# Give the results to extract_eq
+tex_preview(extract_eq(score_model, wrap = TRUE, use_coefs = TRUE))
+```
+
+
+```{r Checking VIF Score}
+vif(score_model)
+cat('Each of the preditor in our model has a VIF value lower than 2 which means the variable and not highly co-related to eachother and it meets the standard to perfrom a linear regression')
+```
+
+
+```{r Normality Test}
+library(ggpubr)
+ggqqplot(imdb.data$score)
+```
+```{r}
+cat("As all the points fall approximately along this reference line, we can assume normality.")
+```
+
+
+```{r Checking Interaction Terms}
+interac_score_model=lm(score~(votes+budget+gross+genre+runtime)^2, data=imdb.data)
+summary(interac_score_model)
+```
+```{r}
+cat('We are checking to see if there are any interaction between our predictors. We can see that there are multiple interaction terms detected in the model. We will add these to our original model and make our interaction model')
+```
+
+```{r IMDB Score Interation Model }
+Interaction_score_model=lm(score~votes+budget+gross+runtime+genre+votes*budget+votes*runtime+budget*gross+votes*gross, data=imdb.data)
+summary(Interaction_score_model)
+
+```
+```{r}
+# Give the results to extract_eq
+tex_preview(extract_eq(interac_score_model, wrap = TRUE, terms_per_line = 6, use_coefs = TRUE))
+```
+
+```{r}
+cat("We can see that our Adujsted R2 value improved even more after adding our interaction terms to the model. The R2 value jumped from 0.40 (Interaction Model) to 0.47 (Interaction model)")
+```
+
+```{r}
+cat("Now let's take check to see if there are any outliers in our data using cook's distance, and remove those outliers to imporve our model")
+```
+
+```{r}
+plot(score_model, 5)
+```
+
+```{r}
+# Calculate Cook's distance
+cooks_distance <- cooks.distance(Interaction_score_model)
+
+# Find the threshold for outliers based on Cook's distance
+threshold <- 4 * mean(cooks_distance)
+
+# Identify outliers based on Cook's distance
+outliers <- which(cooks_distance > threshold)
+
+# Remove outliers from the data
+imdb_without_outliers <- imdb.data[-outliers, ]
+```
+
+```{r}
+cat("We have succesfully removed our outliers, now let us make our final model using our new dataset without outliers.")
+```
+
+```{r IMDB Final Model }
+final_score_model=lm(score~votes+budget+gross+runtime+genre+votes*budget+votes*runtime+budget*gross+votes*gross, data=imdb_without_outliers)
+summary(final_score_model)
+
+```
+```{r}
+# Give the results to extract_eq
+tex_preview(extract_eq(final_score_model, wrap = TRUE, terms_per_line = 6, use_coefs = TRUE))
+```
+
+```{r}
+cat("We can see that our Adujsted R2 value improved even more after removing the outliers. The R2 value jumped from 0.45 (Interaction Model) to 0.50 (final model)")
+```
+
+
+
+```{r}
+#Making our regression tree to answer the same question to see if it performs better
+set.seed (10)
+#Spliting our data in to 80/20 train test split
+train=sample(1:nrow(imdb.data),4/5*nrow(imdb.data))
+test=imdb.data[-train,]
+tree.score<-tree(score~votes+budget+gross+runtime+genre, imdb.data, subset=train)
+summary(tree.score)
+```
+```{r}
+tree.score
+```
+```{r Regression Tree}
+tree.1 <- rpart(tree.score,data=imdb.data)
+fancyRpartPlot(tree.1)
+fancyRpartPlot(tree.1, palettes=c( "Reds"))
+plot(tree.score)
+text(tree.score ,pretty =0)
+```
+```{r}
+# Obtain predicted values from pruned tree
+prepred <- predict(tree.score, newdata = test)
+
+# Calculate MSE
+pre_mse <- mean((prepred - test$score)^2)
+```
+
+```{r}
+cat("MSE of our regression tree is ", pre_mse)
+```
+
+```{r}
+score_hat<-predict(tree.score,test)
+plot((score_hat),(test$score))
+abline(0,1)
+mse_tree<-sqrt(mean((score_hat-test$score)^2)) #the mean squared error
+```
+```{r}
+cat("Mean square error rate for our regression tree is ", mse_tree)
+```
+
+```{r}
+cat('Now let us check if there is any need to prune our tree')
+```
+
+```{r}
+cv.score=cv.tree(tree.score)
+cv.score <- data.frame(size = cv.score$size, dev = cv.score$dev)
+ggplot(cv.score, aes(x = size, y = dev)) +
+  geom_line(color = "dodgerblue", size = 1.5) +
+  geom_point(color = "red", size = 4, shape = 21, fill = "orangered2") +
+  scale_x_continuous(limits = c(min(cv.score$size), max(cv.score$size)),
+                     expand = c(0, 0)) +
+  scale_y_continuous(limits = c(min(cv.score$dev), max(cv.score$dev)),
+                     expand = c(0, 0)) +
+  xlab("Size") +
+  ylab("Deviation") +
+  ggtitle("Cross Validation Score") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+        axis.title = element_text(face = "bold"),
+        axis.text = element_text(face = "italic"))
+
+```
+
+```{r}
+# Identify the tree with the fewest terminal nodes that produces a cross-validated error close to the minimum
+node = cv.score$size[which.min(cv.score$dev)]
+pruned.fit <- prune.tree(tree.score, best = 8)
+summary(pruned.fit)
+```
+
+```{r}
+cat('Looking at the cross validation graph there is need to  prune our tree at node ', node)
+```
+
+
+
+
+```{r}
+cat('Now let us check the cross-validation error for both our linear model and our regression tree to determine which one would be the best to predict the IMDB Score for the movies based on the predictors. We will use k=10 to check the error')
+```
+
+```{r K Fold Cross Validation Error Check}
+set.seed(10)
+folds<-createFolds(imdb.data$score, k=10)
+```
+
+
+```{r}
+train_data<-data.frame(train)
+test_data<-data.frame(test)
+misclassification<-function(idx){
+  Train<-imdb.data[-idx,]
+  Test<-imdb.data[idx,]
+  fit<-lm(score~votes+budget+gross+runtime+genre+votes*runtime+budget*gross+votes*gross, data=Train)
+  pred<-predict(fit,Test)
+  return (sqrt(mean((pred-Test$score)^2)))
+}
+misclassification1<-function(idx){
+  Train<-imdb.data[-idx,]
+  Test<-imdb.data[idx,]
+  fit<-tree(score~votes+budget+gross+genre+runtime, data=Train)
+  pred<-predict(fit,Test)
+  return (sqrt(mean((pred-Test$score)^2)))
+}
+mis_rate=lapply(folds,misclassification)
+cat("\nCross Validation Error of Linear Regression model:\n")
+mean(as.numeric(mis_rate))
+mis_rate=lapply(folds,misclassification1)
+cat("\nCross Validation Error of Regression tree model:\n")
+mean(as.numeric(mis_rate))
+```
+
+
+```{r Prediction Fast and Furious (2021) }
+cat('Now let us check use the movie not in our data to see how accurately it predicts the Fast and Furious 9 movie that came out in 2021')
+predictscore = data.frame(votes=136195, budget=200000000, gross=553223556, runtime=143, genre='Action')
+```
+
+
+```{r Linear Regression Prediction}
+predict(final_score_model,predictscore,interval="predict")
+```
+```{r}
+cat('The actual IMDB Score for Fast and Furious 9 is 5.2 and for our linear model predicted 6.2 which give us a accuracy of about 83%')
+```
+
+
+```{r Regression Tree Prediction }
+predict(tree.score, predictscore, method = "anova")
+```
+
+
+```{r}
+cat('The actual IMDB Score for Fast and Furious 9 is 5.2 and for our Regression tree predicted 6.5 which give us a accuracy of about 80%')
+```
+
+## Question 2
+Using logistic regression to model good/bad movies and multinomial regression to model genre based on the other variables ?
+
+### Logistic Regression on Categorized Scores
+
+```{r Loading Data}
+data=movies 
+data <- na.omit(data)
+```
+
+```{r Getting data information}
+str(data)
+```
+
+```{r Calculating mean}
+# Calculate the mean of the data column
+mean_score= mean(data$score)
+```
+
+```{r Categorize Scores by Mean}
+data$score <- ifelse(data$score > mean_score, "Good", "Bad")
+```
+
+```{r Scores vs Votes Box Plot}
+ggplot(data, aes(x=data$score, y=data$votes, fill=data$score)) + 
+    geom_boxplot()
+```
+
+```{r Scores vs Budget Box Plot}
+ggplot(data, aes(x=score, y=budget, fill=score)) + 
+    geom_boxplot()
+```
+
+```{r Assign 0/1 Values to Score}
+data$scorepred <- ifelse(data$score == "Good", 1, 0)
+```
+
+```{r Base Model}
+basicmodel<-glm(scorepred~rating+genre+votes+budget+gross, family=binomial, data=data)
+```
+
+```{r Multicollinearity Test}
+vif(basicmodel)
+```
+```{r Chi Squared Test for Independence}
+residuals <- residuals(basicmodel, type = "pearson")
+chisq.test(table(residuals, data$scorepred))
+```
+
+
+```{r Train/Test Split}
+set.seed(10) 
+training_indices <- sample(1:nrow(data), size = round(0.85 * nrow(data)))
+train <- data[training_indices,] 
+test <- data[-training_indices,]
+```
+
+
+```{r Training Logistic Regression Model}
+logmodel<-glm(scorepred~rating+genre+votes+budget+gross, family=binomial, data=train)
+summary(logmodel)
+```
+```{r Cooks Distance to remove Outliers}
+cd <- cooks.distance(logmodel)
+outliers <- which(cd > 0.003)
+plot(cd, pch = 20, cex = 1.5, main = "Cook's distance plot")
+abline(h = 0.003, col = "red")
+```
+```{r Removing Outliers}
+train=train[-outliers, ]
+```
+
+
+```{r Enhance Model}
+logmodel.enhance<-glm(scorepred~genre+votes+budget+gross, family=binomial, data=train)
+summary(logmodel.enhance) 
+```
+
+```{r Predict Test Set}
+Prob.predict<-predict(logmodel,test,type="response")
+```
+
+```{r Prediction Table}
+default.predict=rep("Bad",815)
+default.predict[Prob.predict>=0.405]="Good"
+actual=test$score
+tab=table(default.predict,actual)
+tab
+```
+
+```{r Assigning Prediction Variables}
+TN <- tab[1,1]
+FP <- tab[1,2]
+FN <- tab[2,1]
+TP <- tab[2,2]
+```
+
+```{r Calculate Misclassification Rate}
+misclassification_rate <- (FP + FN) / (TN + FP + FN + TP)
+misclassification_rate
+```
+
+
+### Multinominal Classification on Genre Data
+```{r Load Data}
+# Load the data
+data <- movies
+
+(unique(data$genre))
+```
+
+```{r Count Genres}
+data %>% count(genre)
+```
+
+```{r Remove NA data}
+data <- na.omit(data)
+```
+
+```{r Removing Genres with Low Count}
+data <- subset(data, genre!="Family" & genre!="Fantasy" & genre!="History" & genre!="Music" & genre!="Musical" & genre!="Mystery" & genre!="Romance" & genre!="Sci-Fi" & genre!="Sport" & genre!="Thriller" & genre!="Western")
+```
+ 
+```{r Unique Genres in Data}
+unique(data$genre)
+```
+
+```{r Train/Test Split 2}
+train_index <- sample(1:nrow(data), size = 0.85 * nrow(data), replace = FALSE)
+train_data <- data[train_index, ]
+test_data <- data[-train_index, ]
+```
+
+```{r Mulinomial Model Training}
+model <- multinom(genre ~ runtime+budget+gross+rating+score, data = train_data,MaxNWts=10000000,maxit=100)
+```
+
+```{r Removing New Factors from Test Set}
+countriestoremove <- c("Approved")
+test_data <- test_data[!test_data$rating %in% countriestoremove, ]
+```
+
+```{r Prediction for Multinomial Model}
+test_data$ClassPredicted <- predict(model, test_data, "class")
+```
+
+```{r Create Prediction Table}
+table(test_data$ClassPredicted,test_data$genre)
+```
+```{r Calculate Misclassification Rate 2}
+incorrect_predictions <- sum(test_data$genre != test_data$ClassPredicted)
+
+# Calculate the missclassification rate
+missclassification_rate <- incorrect_predictions / nrow(test_data)
+
+# Print the result
+missclassification_rate
+```
+### Decision Tree for Genres
+```{r Loading data 3}
+# Load the data
+data <- movies
+
+length(unique(data$genre))
+```
+
+```{r Data Cleaning}
+data <- na.omit(data)
+data <- data[!(is.na(data$genre)), ]
+data$genre <- as.factor(data$genre)
+data <- data[complete.cases(data), ]
+```
+
+```{r Train/Test Split 4}
+set.seed(10) 
+training_indices <- sample(1:nrow(data), size = round(0.75 * nrow(data)))
+train <- data[training_indices,] 
+test <- data[-training_indices,]
+```
+
+```{r Tree Model}
+tree.class<-tree(genre~., train)
+summary(tree.class)
+```
+
+```{r Plotting the tree}
+plot(tree.class)
+text(tree.class)
+```
+
+```{r Prediction for tree model}
+tree.pred <- predict(tree.class, test, type = "class")
+```
+
+```{r Confusion Matrix for Tree Model}
+confusionMatrix(tree.pred, test$genre, mode = "everything", positive="1")
+```
+
+### Multinomial Model- Tweaking the model to use Genres with more data only
+```{r Load Data 3}
+# Load the data
+data <- movies
+data <- na.omit(data)
+```
+
+```{r Remove Genres with Lower Counts}
+data <- subset(data, genre!="Family" & genre!="Fantasy" & genre!="History" & genre!="Music" & genre!="Musical" & genre!="Mystery" & genre!="Romance" & genre!="Sci-Fi" & genre!="Sport" & genre!="Thriller" & genre!="Western" & genre!="Adventure" & genre!="Animation" & genre!="Biography" & genre!="Crime" & genre!="Horror")
+```
+
+```{r Get Unique Genres}
+unique(data$genre)
+```
+
+```{r Train/Test Split 3}
+train_index <- sample(1:nrow(data), size = 0.85 * nrow(data), replace = FALSE)
+train_data <- data[train_index, ]
+test_data <- data[-train_index, ]
+```
+
+```{r Multinomial Model}
+model <- multinom(genre ~ runtime+budget+gross+rating+score, data = train_data,MaxNWts=10000000,maxit=100)
+```
+
+```{r Removing New Factors from Test Set 2}
+ratingsstoremove <- c("Approved")
+test_data <- test_data[!test_data$rating %in% ratingsstoremove, ]
+```
+
+```{r Prediction for Multinomial Model 2}
+test_data$ClassPredicted <- predict(model, test_data, "class")
+```
+
+```{r Create Prediction Table 2}
+table(test_data$ClassPredicted,test_data$genre)
+```
+
+```{r Calculate Misclassification Rate 3}
+incorrect_predictions <- sum(test_data$genre != test_data$ClassPredicted)
+
+# Calculate the missclassification rate
+missclassification_rate <- incorrect_predictions / nrow(test_data)
+
+# Print the result
+missclassification_rate
+```
+
+## Question 3
+Can we predict Gross Income of the movie?
+
+### Add the additional columns (director_gender and star_gender)
+
+```{r}
+director_genders = read.csv("direct_gender.csv")
+director_genders
+star_genders = read.csv("star_gender.csv")
+star_genders
+movie_with_gender = merge(movies,director_genders,by="director",all.y=TRUE)
+movie_with_gender = merge(movie_with_gender,star_genders,by="star",all.y=TRUE)
+movie_with_gender = na.omit(movie_with_gender)
+```
+
+```{r}
+#excluded: Joey Soloway,Non-binary
+unique(director_genders$director_gender)
+unique(star_genders$star_gender)
+```
+
+```{r}
+#omit countrie and genre
+combinedSet = na.omit(movie_with_gender[c("rating","year","score","votes","budget","gross","runtime","star_gender","director_gender")])
+
+combinedSet["star_gender"]=as.factor(combinedSet$star_gender)
+combinedSet["director_gender"]=as.factor(combinedSet$director_gender)
+
+#check the dimensions of the new non-na dataframe
+dim(combinedSet)
+```
+
+```{r}
+dim(subset(combinedSet,director_gender == "Male"))
+dim(subset(combinedSet,director_gender == "Female"))
+```
+
+### Modelling Gross Income:
+
+```{r}
+model_linreg.all = lm(gross~.,data=combinedSet)
+```
+
+```{r}
+vif(model_linreg.all)
+```
+
+Some ratings have VIFs > 1, but all are less than 5, so we assume no multicollinearity.
+```{r}
+summary(model_linreg.all)
+```
+
+Based on the summary, we re-create our linear regression
+
+```{r}
+model_linreg.best = lm(gross~rating+score+votes+budget+runtime+star_gender,data=combinedSet)
+summary(model_linreg.best)
+```
+
+We can see that star_gender is significant, but director_gender is not. We'll do some analysis on this later.
+
+```{r}
+ggplot(model_linreg.best, aes(x=.fitted, y=.resid)) + geom_point() + geom_smooth()+ geom_hline(yintercept = 0)
+```
+The cone-shaped data implies that our assumption of homoscedasticity fails.
+```{r}
+hist(residuals(model_linreg.best))
+```
+```{r}
+plot(model_linreg.best,which=2)
+```
+
+The residuals are non-normally distributed
+
+```{r}
+ plot(model_linreg.best,pch=18,col="red",which=c(4))
+```
+2 data points have very high cook's distances but they fall within 1.
+
+### Models for predicting star_gender
+
+Since we know that star_gender is a significant predictor of a movie's gross income, let's explore the star_gender of these movies a bit more.
+
+Let's start by looking at how many movies have Male stars vs Female stars.
+```{r}
+star_female = subset(combinedSet, star_gender == "Female")
+star_male = subset(combinedSet, star_gender == "Male")
+dim(star_female)
+dim(star_male)
+```
+
+Just over 25% of all movies have a Female star.
+
+```{r}
+set.seed(2023)
+train_index=sample(1:nrow(combinedSet),3/4*nrow(combinedSet))
+test=combinedSet[-train_index,]
+train = combinedSet[train_index,]
+cat(
+  "Training set: ",dim(train), "\nTesting set: ",dim(test)
+)
+```
+
+
+```{r}
+model_logreg = glm(factor(director_gender)~.,family = binomial, data = train)
+summary(model_logreg)
+```
+
+Just wanted to see what a model predicting `director_gender` would look like.
+
+```{r}
+model_logreg.star_gender = glm(star_gender~.,family = binomial, data = train)
+summary(model_logreg.star_gender)
+```
+
+Now let's refine the model
+
+```{r}
+model_logreg.star_gender.best = glm(star_gender~year+score+votes+budget+gross+director_gender,family = binomial, data = train)
+summary(model_logreg.star_gender.best)
+```
+
+#### Misclassification Rate
+
+Finally we'll use the test data from earlier to verify this logistic regression model
+
+```{r}
+prob.predict = predict(model_logreg.star_gender.best,test,type="response")
+Predict = rep(0,dim(test)[1])
+Predict[prob.predict>=0.5]=1
+Actual = test$star_gender
+table(Predict,Actual)
+```
+
+```{r}
+(301+23)/(34+23+301+1010)
+```
+
+23.68% misclassification rate.
+
+```{r}
+variables = c("year","score","votes","budget","gross","runtime")
+#qqnorm(star_female[["year"]])
+for (i in variables ){
+  qqnorm(star_female[[i]]);
+  qqline(star_female[[i]],col = 2)
+}
+```
+```{r}
+variables = c("year","score","votes","budget","gross","runtime")
+for (i in variables ){
+  qqnorm(star_male[[i]]);
+  qqline(star_male[[i]],col = 2)
+}
+```
+
+```{r}
+shapiro.test(star_female$year)
+shapiro.test(star_male$year)
+```
+
+Really non-normally distributed data. Makes sense because movies are highly specific projects.
+
+### LDA
+
+```{r}
+lda.star_gender=lda(star_gender~.,data=train)
+lda.star_gender.best = lda(star_gender~year+score+votes+budget+gross+director_gender,data=train)
+```
+
+#### Misclassification Rate of LDA
+
+```{r}
+lda.pred = predict(lda.star_gender,test)
+names(lda.pred)
+table(lda.pred$class,test$star_gender)
+cat("Misclassification Rate: ",(335)/(25+25+300+998))
+```
+
+It is very slightly lower when the model is tailored
+
+```{r}
+lda.pred = predict(lda.star_gender.best,test)
+names(lda.pred)
+table(lda.pred$class,test$star_gender)
+cat("Misclassification Rate: ",(300+33)/(35+33+300+1000))
+```
+
+### QDA
+
+```{r}
+qda.star_gender = qda(star_gender~year+score+votes+budget+gross+director_gender,data = train)
+```
+
+#### Misclassification of QDA
+```{r}
+qda.class = predict(qda.star_gender,test)$class
+table(qda.class,test$star_gender)
+cat("Misclassification Rate: ",(297+42)/(38+42+297+991))
+```
+
+## Question 4 
+Can the movie rating be predicted? If so, with which variables?
+
+### Further understanding the dataset...
+
+```{r}
+movie = read.csv("movies.csv")
+```
+
+First, the available ratings are reviewed.
+```{r}
+unique(movie$rating)
+```
+```{r}
+movie %>% count(rating)
+```
+It appears that there are empty records and there are two sets of ratings that can be combined:
+1) Not Rated and Unrated
+UR (Unrated) and NR (Not Rated) are equivalent within the cinema world (ATLAS Cinemas, 2023).
+2) "X" and "NC-17"
+"X" was updated to "NC-17" (Taylor, 2004).
+
+```{r}
+rating_updates = c('Unrated'='Not Rated','X'='NC-17')
+movie.updated <- movie %>% 
+  mutate(rating.updated = str_replace_all(rating, rating_updates))
+#References: 
+# 1)https://sparkbyexamples.com/r-programming/replace-string-with-another-string-in-r/
+# 2)https://stackoverflow.com/questions/29271549/replace-all-occurrences-of-a-string-in-a-data-frame
+```
+
+```{r}
+#Check if the replacement was successful
+movie.updated %>% count(rating.updated)
+```
+
+```{r}
+head(movie.updated,3)
+```
+
+To save computational time, all unnecessary columns are dropped. 
+
+```{r}
+movie.updated = subset(movie.updated, select = c(3,6,7,8,9,10,11,12,13,14,15,16))
+head(movie.updated,3)
+```
+
+Next the rows with missing rating information is removed.
+```{r}
+movie.updated = movie.updated[-(which(movie.updated$rating.updated %in% "")),]
+```
+
+```{r}
+#Check the missing rating has been removed
+sam = movie.updated %>% count(rating.updated)
+sam
+```
+
+All data manipulations are complete. Specific manipulations will be done within each method. 
+
+### Finalized approach: Contingency Table
+
+When incorporating director, writer, star, country, or company, the table was very large and introduced predictors with many different inputs and thus resulted in being unable to show correlation to rating. Therefore, only genre was used as a predictor. In addition, this was the original hypothesis when generating this exploratory question since it was suspected that certain genres would be more likely to have certain ratings (e.g. horror films are more likely to be rated R).
+
+First the proportion table is created.
+
+```{r}
+cont.tab<-table(movie.updated$rating.updated, movie.updated$genre)
+cont.tab
+```
+
+```{r}
+#The proportions are determined
+prop.table(cont.tab)
+```
+```{r}
+#The proportions are determined as a conditional on the row variable
+prop.table(cont.tab, margin = 1)
+```
+Since it's not a 2 by 2 contingency table, the following tests can not be applied: tests of difference, relative risk and odds ratio. Instead, the Chi-square for hypothesis testing and if warning is received, then Fisher's test. 
+
+The hypotheses being tested as part of the Chi-square test are:
+$$
+\begin{aligned}
+H_0&:\theta=1\\
+H_a&:\theta \neq 1\\
+\text{Where } &\theta \text{ is defined as the odds ratio}
+\end{aligned}
+$$
+
+```{r}
+chisq.test(cont.tab)
+```
+The warning for Chi-Square approximation appears. Therefore, the Fisher’s exact test would be a more accurate method. This makes logical sense as some of the observations for certain categories are very low, specifically for the categories "Approved", "TV-14", "TV-MA", "TV-PG", and "X", there are very low quantities of observations (9 at most, 1 at the least).
+
+```{r}
+fisher.test(cont.tab, alternative = "two.sided")
+```
+A warning message indicates that the p-value needs to be simulated. This is required due to the computational power needed to calculate the p-value based off the given data is too large. Therefore, RStudio has recommended simulated p-values instead. 
+
+```{r}
+fisher.test(cont.tab, alternative = "two.sided",simulate.p.value=TRUE)
+```
+Due to the very low p-value (less than an $/alpha$ of 0.05), the null hypothesis is rejected and thus, the two variables show dependence to one another.
+
+The Chi-Square test was attempted again, this time, with categories with higher number of observations only. The categories with low observations are removed ("Approved", "TV-14", "TV-MA", "TV-PG", and "X").
+
+```{r}
+cont.tab.updated<-
+  table(movie.updated[-(which(movie.updated$rating.updated %in% c('Approved','TV-14','TV-MA','TV-PG'))),]$rating.updated, movie.updated[-(which(movie.updated$rating.updated %in% c('Approved','TV-14','TV-MA','TV-PG'))),]$genre)
+cont.tab.updated
+```
+```{r}
+chisq.test(cont.tab.updated)
+```
+Unfortunately, the chi-squared approximation error warning was received once again, thus, Fisher's exact test is more appropriate. 
+
+```{r}
+fisher.test(cont.tab.updated, alternative = "two.sided")
+```
+Again, the p-value needs to be simulated. Therefore, it can be seen that removing the categories with low observations could not eliminate the need for Fisher's exact test nor simulated p-values. 
+
+Another re-attempt is completed removing the rating "NC-17", since it has below 100 observations - thus, it is also a lower sample size. 
+
+```{r}
+cont.tab.updated2<-
+  table(movie.updated[-(which(movie.updated$rating.updated %in% c('Approved','TV-14','TV-MA','TV-PG','NC-17'))),]$rating.updated, movie.updated[-(which(movie.updated$rating.updated %in% c('Approved','TV-14','TV-MA','TV-PG','NC-17'))),]$genre)
+cont.tab.updated2
+```
+```{r}
+chisq.test(cont.tab.updated2)
+```
+Unfortunately, the chi-squared approximation error warning was received once again, thus, Fisher's exact test is more appropriate. 
+
+```{r}
+fisher.test(cont.tab.updated2, alternative = "two.sided")
+```
+Again, the p-value needs to be simulated, indicating that removing the categories with low observations could not eliminate the need for Fisher's exact test nor simulated p-values.
+
+##### Nominal-ordinal Test
+
+It could be said that there is a natural ordering to the rating. As per (reference below), the ordering goes: "G", "PG", "PG-13", "R", "NC-17", "Not Rated" (Motion Picture Association, 2023).
+
+The TV ratings can be classified on a different scale, where the ordering is: "TV-PG", "TV-14", "TV-MA" (TV Parental Guidelines, n.d.).
+
+The "Approved" rating has no ordinal reference because this rating was what was given prior to the current "scale" references, where previously, films were "Approved" or "Not Approved" (IMDb, 2013) (John, 2016). Ideally, this could've been modelled using a binomial distribution but there is no information on movies that were "Not approved". Thus, this category will not be included in this section of analysis.          
+
+Therefore, Nominal-ordinal can also be applied, the dataset will be split into TV ratings and cinema ratings to attempt this method.  
+
+```{r}
+#Create separate dataframes from applicable TV ratings and applicable cinema ratings. 
+TV = movie.updated[which(movie.updated$rating.updated %in% c('TV-14','TV-MA','TV-PG')),]
+cinema = movie.updated[-(which(movie.updated$rating.updated %in% c('Approved','TV-14','TV-MA','TV-PG'))),]
+```
+
+```{r}
+#Check desired outputs are present
+print(unique(TV$rating.updated))
+print(unique(cinema$rating.updated))
+```
+The ranking will be assigned such that more mature content will be given a higher score. 
+
+The TV ratings will be evaluated first.
+
+```{r}
+#Renaming the columns in TV to allow for "ranking"
+TV["rating.updated"][TV["rating.updated"] == 'TV-PG'] <- 1
+TV["rating.updated"][TV["rating.updated"] == 'TV-14'] <- 2
+TV["rating.updated"][TV["rating.updated"] == 'TV-MA'] <- 3
+#Reference: https://datatofish.com/replace-values-dataframe-r/
+
+head(TV,3) #Checking the values were updated correctly
+print(unique(TV$rating.updated))
+```
+```{r}
+#Creating the appropriate data frame such that the ordinal data is the "Y" columns
+TV.tab<-table(TV$genre,TV$rating.updated)
+TV.tab
+```
+```{r}
+#Add variable names back
+names(dimnames(TV.tab))=c('Genre','TV.Rating')
+TV.tab
+```
+
+```{r}
+#Convert to a dataframe
+TV.df<-as.data.frame(TV.tab)
+TV.df
+```
+
+```{r}
+#Convert to table style dataframe
+TV.Rating=vector()
+Genre=vector()
+
+for (i in 1:length(TV.df$Freq)){
+  Genre=c(rep(as.character(TV.df$Genre[i]), TV.df$Freq[i]), Genre)
+  TV.Rating=c(rep(as.numeric(levels(TV.df$TV.Rating[i]))[TV.df$TV.Rating[i]], TV.df$Freq[i]), TV.Rating)
+}
+
+TV.df2<-data.frame(Genre, TV.Rating)
+TV.df2
+```
+
+```{r}
+#ANOVA 
+TV_aov<-aov(TV.Rating~Genre, data = TV.df2)
+summary(TV_aov)
+```
+Since the p-value is greater than that of $\alpha$ 0.05, the null hypothesis can not be rejected, indicated both variables are independent to one another. This is likely due to the small sample size for TV ratings.
+
+Next, the cinema ratings will be reviewed.
+
+```{r}
+#Renaming the columns in Cinema to allow for "ranking"
+cinema["rating.updated"][cinema["rating.updated"] == 'G'] <- 1
+cinema["rating.updated"][cinema["rating.updated"] == 'PG'] <- 2
+cinema["rating.updated"][cinema["rating.updated"] == 'PG-13'] <- 3
+cinema["rating.updated"][cinema["rating.updated"] == 'R'] <- 4
+cinema["rating.updated"][cinema["rating.updated"] == 'NC-17'] <- 5
+cinema["rating.updated"][cinema["rating.updated"] == 'Not Rated'] <- 6
+
+head(cinema,3) #Checking the values were updated correctly
+print(unique(cinema$rating.updated))
+```
+```{r}
+#Creating the appropriate data frame such that the ordinal data is the "Y" columns
+cinema.tab<-table(cinema$genre,cinema$rating.updated)
+cinema.tab
+```
+```{r}
+#Add variable names back
+names(dimnames(cinema.tab))=c('Genre','cinema.Rating')
+cinema.tab
+```
+
+```{r}
+#Convert to a dataframe
+cinema.df<-as.data.frame(cinema.tab)
+cinema.df
+```
+
+```{r}
+#Convert to table style dataframe
+Cinema.Rating=vector()
+Genre=vector()
+
+for (i in 1:length(cinema.df$Freq)){
+  Genre=c(rep(as.character(cinema.df$Genre[i]), cinema.df$Freq[i]), Genre)
+  Cinema.Rating=c(rep(as.numeric(levels(cinema.df$cinema.Rating[i]))[cinema.df$cinema.Rating[i]], cinema.df$Freq[i]), Cinema.Rating)
+}
+
+cinema.df2<-data.frame(Genre, Cinema.Rating)
+cinema.df2
+```
+
+```{r}
+#ANOVA 
+cinema_aov<-aov(Cinema.Rating~Genre, data = cinema.df2)
+summary(cinema_aov)
+```
+Since the p-value is less than that of $\alpha$ 0.05, the null hypothesis is rejected, indicated both variables are not independent to one another. Thus, the Genre is related to the rating given.
+
+The proportions for movies with cinema ratings will be determined.
+
+```{r}
+#The proportions are determined as a conditional on the row variable
+prop.table(cinema.tab, margin = 1)
+#This is conditional table
+```
+```{r}
+cinema %>% count(genre)
+```
+'Family','Fantasy','Music','Musical','Mystery','Romance','Sci-Fi','Sport','Thriller',and 'Western' have fewer than 50 observations. For a more concise table for better conclusions, the proportion table is updated to remove anything with less than 50 observations.
+
+```{r}
+#Anything less than 50 observations in the genre is removed 
+genre.remove <- c('Family','Fantasy','Music','Musical','Mystery','Romance','Sci-Fi','Sport','Thriller','Western')
+cinema.updated = cinema[-(which(cinema$genre %in% genre.remove)),]
+```
+
+```{r}
+cinema.tab2<-table(cinema.updated$genre,cinema.updated$rating.updated)
+cinema.tab2
+```
+```{r}
+#The proportions are determined as a conditional on the row variable
+prop.table(cinema.tab2, margin = 1)
+#This is conditional table
+```
+
+The Chi-Square test is reattempted to determine if this updated dataset will not trigger the small sample size warning.
+
+```{r}
+chisq.test(cinema.tab)
+```
+Unfortunately, the chi-squared approximation error warning was received once again, thus, Fisher's exact test is more appropriate. 
+
+```{r}
+fisher.test(cinema.tab, alternative = "two.sided")
+```
+```{r}
+fisher.test(cinema.tab, alternative = "two.sided", simulate.p.value=TRUE)
+```
+
+Again, the p-value needs to be simulated. Thus, the updated dataset did not result in a different analysis path.
+
+### Alternative approaches which yielded results: LDA/QDA and Categorical Tree
+
+These methods were not pursued due to high misclassification rates and the restriction of being unable to incorporate categorical variables as predictors.
+
+#### Categorical Tree
+
+Step 1: Splitting the data into training and validation 
+
+```{r}
+colnames(movie.updated)
+```
+The categorical variables returned above (not including updated rating) are: genre, director, writer, star, country, and company. These variables are nominal, not ordinal; therefore, these categorical variables cannot be included in the categorization tree.
+
+```{r}
+#Removing all missing values in the dataframe for the classification tree method 
+movie.tree = na.omit(movie.updated)
+#Reference: https://statisticsglobe.com/na-omit-r-example/
+```
+
+```{r}
+dim(movie.tree)
+```
+```{r}
+sam2 <- movie.tree %>% count(rating.updated)
+sam2
+```
+
+Ideally, stratified sampling would be used to sample a desired percentage from each rating category. However, for the categories "Approved" and "TV-MA", there are very low quantities of observations (1 and 2, respectively). Thus, it is understood that for these categories, the observations will be removed as unfortunately, no data is available for testing. 
+
+```{r}
+ratings.remove <- c('Approved','TV-MA')
+movie.tree <- movie.tree[!movie.tree$rating.updated %in% ratings.remove, ]
+```
+
+```{r}
+#Check the appropriate rating categories have been removed
+sam2 <- movie.tree %>% count(rating.updated)
+sam2
+```
+The data will be split using the 80-20 convention - 80% of the data used for training while 20% is used for validation (Joseph, 2022). 
+
+```{r}
+#Creating a table visualizing the sample amount
+sam2 <- sam2 %>% mutate(sampleamount = round(n*0.8,0))
+sam2
+```
+```{r}
+#Ordering the dataframe by rating for a proper sampling
+movie.tree <- movie.tree[order(movie.tree$rating.updated),]
+```
+
+```{r}
+#Sampling
+set.seed(8) #Random seed chosen after group number
+Ny=unlist(unname(sam2[3]))
+id.rating=sampling:::strata(movie.tree, stratanames=c("rating.updated"), size=Ny, method="srswor")
+training.rating=movie.tree[id.rating$ID_unit,]
+test.rating=movie.tree[-id.rating$ID_unit,]
+```
+
+```{r}
+#Check sampling is as expected - i.e. equivalent to what has been determined above 
+training.rating %>% count(rating.updated)
+```
+```{r}
+#Check what is remaining for testing
+testingcheck = test.rating %>% count(rating.updated)
+testingcheck
+```
+
+Step 2: Classification Tree Creation 
+
+```{r}
+set.seed(8)
+tree.rating<-tree(factor(rating.updated)~score+votes+budget+gross+runtime, training.rating)
+tree.rating
+```
+```{r}
+plot(tree.rating) #Plotting the tree to show which variables are used to construct the tree
+text(tree.rating,pretty=0)
+```
+```{r}
+tree.ratingpred<-predict(tree.rating,test.rating,type = "class")
+table(tree.ratingpred,test.rating$rating.updated)
+```
+```{r}
+total = sum(unname(testingcheck[2]))
+mistreerating1 = ((total - (1+24+47+510))/total)*100
+mistreerating1
+```
+
+The tree is pruned to determine if a more accurate tree can be created. 
+
+```{r}
+set.seed(8)
+cv.rating<-cv.tree(tree.rating, FUN = prune.misclass, K=10) 
+plot(cv.rating$size, cv.rating$dev,type="b")
+```
+Using the cross-validation result, it looks like the "best" tree which minimizes cross-validation error is at 5 nodes. 
+
+```{r}
+prune.rating=prune.tree(tree.rating,best=5)
+plot(prune.rating)
+text(prune.rating,pretty=0)
+```
+Now, the pruned tree's misclassification error will be determined.
+
+```{r}
+prunerating.pred=predict(prune.rating,test.rating,type="class")
+table(prunerating.pred,test.rating$rating.updated)
+```
+```{r}
+mistreerating2 = ((total - (24+47+510))/total)*100
+mistreerating2
+```
+The misclassification rate is slightly higher but this model would be proposed over the previous as it is a small increase in the misclassification rate for a lower cross-validation error. Overall, the error rate is still quite high. 
+
+#### LDA/QDA
+
+For LDA and QDA methods, continuous variables are used for predictors to satisfy the assumptions. Thus, only the numerical variables will be considered for this approach. 
+
+Assumptions Review:
+1) The equal variance assumption was reviewed first using the BP-test. 
+
+$$
+  H_{0}: \text{Heteroscedasticity is not present (homoscedasticity)}\\ 
+  H_{A}: \text{heteroscedasticity is present}
+$$
+
+```{r}
+lda.assumptions = lm(score~votes+budget+gross+runtime, data=movie.tree)
+```
+
+```{r}
+bptest(lda.assumptions)
+```
+As the p-value of the model is smaller than 0.05, we will reject the null hypothesis and conclude that the homoscedasticity (i.e. equal variance) does not hold.
+
+2) The normality assumption was reviewed
+
+The following categories do not have more than 25 samples and thus, would likely fail the normality assumption as it does not pass the Central Limit Theorem requirements: Approved, TV-MA, and NC-17. As previously stated, both Approved and TV-MA are not included in the final modelling process regardless. The normality assumption will still be reviewed for NC-17 out of an abundance of caution. 
+
+```{r}
+ggplot(movie.tree, aes(sample=lda.assumptions$residuals)) + stat_qq() + stat_qq_line()+ labs(title="Normality check for Rating Predictors (Overall)") + labs(x="Theoretical Quantile", y="Sample Quantile")
+```
+
+Due to the large sample size, the Shapiro-Wilk test did not work on the overall sample. However, when the normal distribution for each category is reviewed, the Shapiro-Wilk test will be applied. 
+
+The hypotheses being tested as part of the Shapiro-Wilk test are: 
+$$
+H_{0}:  \text{The sample data are significantly normally distributed}\\
+H_{A}:  \text{The sample data are not significantly normally distributed}
+$$
+```{r}
+#G
+assumptions.G <- movie.tree[movie.tree$rating.updated %in% 'G', ]
+lda.assumptions.G = lm(score~votes+budget+gross+runtime, data=assumptions.G)
+ggplot(assumptions.G, aes(sample=lda.assumptions.G$residuals)) + stat_qq() + stat_qq_line()+ labs(title="Normality check for Rating Predictors (G)") + labs(x="Theoretical Quantile", y="Sample Quantile")
+shapiro.test(residuals(lda.assumptions.G))
+```
+Base on the result of Shapiro-Wilk normality test, with the p-value lower than 0.05, we should reject the null hypothesis and conclude that the sample data are not normally distributed.
+
+```{r}
+#NC-17
+assumptions.NC17 <- movie.tree[movie.tree$rating.updated %in% 'NC-17', ]
+lda.assumptions.NC17 = lm(score~votes+budget+gross+runtime, data=assumptions.NC17)
+ggplot(assumptions.NC17, aes(sample=lda.assumptions.NC17$residuals)) + stat_qq() + stat_qq_line()+ labs(title="Normality check for Rating Predictors (NC-17)") + labs(x="Theoretical Quantile", y="Sample Quantile")
+shapiro.test(residuals(lda.assumptions.NC17))
+```
+Base on the result of Shapiro-Wilk normality test, with the p-value higher than 0.05, we should not reject the null hypothesis and conclude that the sample data are normally distributed.
+
+```{r}
+#Not Rated
+assumptions.NR <- movie.tree[movie.tree$rating.updated %in% 'Not Rated', ]
+lda.assumptions.NR = lm(score~votes+budget+gross+runtime, data=assumptions.NR)
+ggplot(assumptions.NR, aes(sample=lda.assumptions.NR$residuals)) + stat_qq() + stat_qq_line()+ labs(title="Normality check for Rating Predictors (Not Rated)") + labs(x="Theoretical Quantile", y="Sample Quantile")
+shapiro.test(residuals(lda.assumptions.NR))
+```
+Base on the result of Shapiro-Wilk normality test, with the p-value higher than 0.05, we should not reject the null hypothesis and conclude that the sample data are normally distributed.
+
+```{r}
+#PG
+assumptions.PG <- movie.tree[movie.tree$rating.updated %in% 'PG', ]
+lda.assumptions.PG = lm(score~votes+budget+gross+runtime, data=assumptions.PG)
+ggplot(assumptions.PG, aes(sample=lda.assumptions.PG$residuals)) + stat_qq() + stat_qq_line()+ labs(title="Normality check for Rating Predictors (PG)") + labs(x="Theoretical Quantile", y="Sample Quantile")
+shapiro.test(residuals(lda.assumptions.PG))
+```
+Base on the result of Shapiro-Wilk normality test, with the p-value lower than 0.05, we should reject the null hypothesis and conclude that the sample data are not normally distributed.
+
+```{r}
+#PG-13
+assumptions.PG13 <- movie.tree[movie.tree$rating.updated %in% 'PG-13', ]
+lda.assumptions.PG13 = lm(score~votes+budget+gross+runtime, data=assumptions.PG13)
+ggplot(assumptions.PG13, aes(sample=lda.assumptions.PG13$residuals)) + stat_qq() + stat_qq_line()+ labs(title="Normality check for Rating Predictors (PG-13)") + labs(x="Theoretical Quantile", y="Sample Quantile")
+shapiro.test(residuals(lda.assumptions.PG13))
+```
+Base on the result of Shapiro-Wilk normality test, with the p-value lower than 0.05, we should reject the null hypothesis and conclude that the sample data are not normally distributed.
+
+```{r}
+#R
+assumptions.R <- movie.tree[movie.tree$rating.updated %in% 'R', ]
+lda.assumptions.R = lm(score~votes+budget+gross+runtime, data=assumptions.R)
+ggplot(assumptions.R, aes(sample=lda.assumptions.R$residuals)) + stat_qq() + stat_qq_line()+ labs(title="Normality check for Rating Predictors (R)") + labs(x="Theoretical Quantile", y="Sample Quantile")
+shapiro.test(residuals(lda.assumptions.R))
+```
+Base on the result of Shapiro-Wilk normality test, with the p-value lower than 0.05, we should reject the null hypothesis and conclude that the sample data are not normally distributed.
+
+It appears that large sample sizes do not fit the normality assumption. Since the larger samples are driving the overall dataset to not meet the normality assumption, it can be concluded that normality is not met. 
+
+For the sake of understanding both methods of analyses, the LDA/QDA model will continue to be applied.
+
+##### LDA 
+
+```{r}
+lda.rating<-lda(rating.updated~score+votes+budget+gross+runtime, data=training.rating)
+lda.rating
+```
+```{r}
+plot(lda.rating)
+```
+```{r}
+rating.pred<-predict(lda.rating,test.rating)
+table(rating.pred$class,test.rating$rating.updated)
+```
+```{r}
+unique(rating.pred$class)
+```
+```{r}
+unique(test.rating$rating.updated)
+```
+The generated table has no predictions for the categories NC-17 and Not Rated - therefore, that portion of the table is blank.
+
+```{r}
+correct = 2+10+115+482
+mis.rate = (total - correct)/total
+print(round(mis.rate*100,4))
+```
+
+##### QDA 
+
+```{r}
+qda.rating<-qda(rating.updated~score+votes+budget+gross+runtime, data=training.rating)
+qda.rating
+```
+
+```{r}
+rating.pred.qda<-predict(qda.rating,test.rating)
+table(rating.pred.qda$class,test.rating$rating.updated)
+```
+```{r}
+correct = 2+29+102+473
+mis.rate = (total - correct)/total
+print(round(mis.rate*100,4))
+```
+
+### Approaches which did not yield results: Multinomial
+
+Ideally, after the Contingency Table method determined that the two variables are correlated, the probabilities can be determined through the Multinomial method. 
+
+```{r}
+#Create the table
+multinomial.tab<-table(cinema$genre,cinema$rating.updated)
+multinomial.tab
+```
+```{r}
+G = unname(multinomial.tab[,1])
+PG = unname(multinomial.tab[,2])
+PG.13 = unname(multinomial.tab[,3])
+R = unname(multinomial.tab[,4])
+NC.17 = unname(multinomial.tab[,5])
+Not.Rated = unname(multinomial.tab[,6])
+Genre = unique(cinema[order(cinema$genre),]$genre)
+```
+
+```{r}
+multinomial.data<-data.frame(Genre,G,PG,PG.13,R,NC.17,Not.Rated)
+multinomial.data
+```
+
+Since it is a ordinal categorical variable, either the cumulative logit or continuation ratio method should be applied. 
+
+The cumulative logit method is applied first.
+```{r}
+cum.logit=vglm(cbind(G, PG, PG.13, R, NC.17, Not.Rated)~Genre, family=cumulative(parallel = TRUE), data=multinomial.data)
+```
+
+Check the coefficients:
+```{r}
+coef(cum.logit)
+```
+Check the goodness-of-fit
+```{r}
+1-pchisq(deviance(cum.logit),df.residual(cum.logit))
+```
+
+The cumulative logit method with reduced rows is attempted to improve the goodness-of-fit.
+```{r}
+#Anything less than 50 observations in the genre is removed 
+genre.remove <- c('Family','Fantasy','Music','Musical','Mystery','Romance','Sci-Fi','Sport','Thriller','Western')
+cinema.updated = cinema[-(which(cinema$genre %in% genre.remove)),]
+```
+
+```{r}
+#Create the table
+multinomial.tab2<-table(cinema.updated$genre,cinema.updated$rating.updated)
+multinomial.tab2
+```
+```{r}
+G_2 = unname(multinomial.tab2[,1])
+PG_2 = unname(multinomial.tab2[,2])
+PG.13_2 = unname(multinomial.tab2[,3])
+R_2 = unname(multinomial.tab2[,4])
+NC.17_2 = unname(multinomial.tab2[,5])
+Not.Rated_2 = unname(multinomial.tab2[,6])
+Genre_2 = unique(cinema.updated[order(cinema.updated$genre),]$genre)
+```
+
+```{r}
+multinomial.data2<-data.frame(Genre_2,G_2,PG_2,PG.13_2,R_2,NC.17_2,Not.Rated_2)
+multinomial.data2
+```
+
+```{r}
+cum.logit2=vglm(cbind(G_2, PG_2, PG.13_2, R_2, NC.17_2, Not.Rated_2)~Genre_2, family=cumulative(parallel = TRUE), data=multinomial.data2)
+```
+
+Check the goodness-of-fit
+```{r}
+1-pchisq(deviance(cum.logit2),df.residual(cum.logit2))
+```
+It did not improve.
+
+The continuation ratio is attempted next. 
+```{r}
+fit.cratio <- vglm(cbind(G, PG, PG.13, R, NC.17, Not.Rated)~Genre, family=cratio(reverse=FALSE, parallel=TRUE), data=multinomial.data)
+```
+
+Check the goodness-of-fit.
+```{r}
+1-pchisq(deviance(fit.cratio),df.residual(fit.cratio))
+```
+
+The baseline category method is attempted to see if it has a better goodness-of-fit. A warning message was received indicating the table was too large for a proper computation. Thus, the reduced table is used.
+```{r}
+fit.blogit=vglm(cbind(G_2,PG_2,PG.13_2,R_2,NC.17_2,Not.Rated_2)~Genre_2,family=multinomial,data=multinomial.data2)
+```
+The same warning messaged is received. However, the command was executed so the goodness-of-fit will be determined.
+```{r}
+1-pchisq(deviance(fit.blogit),df.residual(fit.blogit))
+```
+Still low goodness-of-fit.
+
